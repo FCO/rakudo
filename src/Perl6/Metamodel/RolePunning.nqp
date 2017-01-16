@@ -36,10 +36,11 @@ role Perl6::Metamodel::RolePunning {
 		for $obj.HOW.methods($obj) -> $meth {
 			if $meth.yada {
 				$pun.HOW.add_method($pun, $meth.name, nqp::getstaticcode(sub ($self) {
-					my $px := X::StubCode.new();
+					#my $px := $*W.find_symbol(['X', 'StubCode']).new();
 					my $ex := nqp::newexception();
-					nqp::setpayload($ex, $px);
-					nqp::setmessage($ex, nqp::unbox_s(~$px.message));
+					#nqp::setpayload($ex, $px);
+					#nqp::setmessage($ex, nqp::unbox_s(~$px.message));
+					nqp::setmessage($ex, nqp::unbox_s("Stubbed code!"));
 					nqp::throw($ex)
 				}));
 			}
