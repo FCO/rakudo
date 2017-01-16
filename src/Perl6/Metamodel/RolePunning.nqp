@@ -33,6 +33,17 @@ role Perl6::Metamodel::RolePunning {
         my $pun := $!pun_repr
             ?? $pun_meta.new_type(:name(self.name($obj)), :repr($!pun_repr))
             !! $pun_meta.new_type(:name(self.name($obj)));
+		for $obj.HOW.methods($obj) -> $meth {
+			if $meth.yada {
+				$pun.HOW.add_method($pun, $meth.name, nqp::getstaticcode(sub ($self) {
+					my $px := X::StubCode.new();
+					my $ex := nqp::newexception();
+					nqp::setpayload($ex, $px);
+					nqp::setmessage($ex, nqp::unbox_s(~$px.message));
+					nqp::throw($ex)
+				}));
+			}
+		}
         $pun.HOW.add_role($pun, $obj);
         $pun.HOW.compose($pun);
         my $why := self.WHY;
