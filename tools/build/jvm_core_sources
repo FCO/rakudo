@@ -13,6 +13,7 @@ src/core/Attribute.pm
 src/core/Iterator.pm
 src/core/SlippyIterator.pm
 src/core/Rakudo/Internals.pm
+src/core/Rakudo/Iterator.pm
 src/core/HyperIterator.pm
 src/core/Iterable.pm
 src/core/HyperIterable.pm
@@ -128,6 +129,8 @@ src/core/Thread.pm
 src/core/Lock.pm
 src/core/Semaphore.pm
 src/core/Cancellation.pm
+src/core/Awaitable.pm
+src/core/Awaiter.pm
 src/core/Scheduler.pm
 src/core/Env.pm
 src/core/ThreadPoolScheduler.pm
@@ -179,4 +182,5 @@ src/core/StrDistance.pm
 src/core/Slang.pm
 src/core/Metamodel/Primitives.pm
 src/core/REPL.pm
+src/core/Rakudo/Metaops.pm
 src/core/core_epilogue.pm

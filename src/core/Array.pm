@@ -1,7 +1,11 @@
+# for our tantrums
 my class X::TypeCheck { ... };
+my class X::TypeCheck::Splice { ... }
 my class X::Subscript::Negative { ... };
 my class X::NotEnoughDimensions { ... };
 my class X::Assignment::ArrayShapeMismatch { ... };
+
+# stub what we need now
 my class array is repr('VMArray') { ... };
 
 # An Array is a List that ensures every item added to it is in a Scalar
@@ -16,10 +20,12 @@ my class Array { # declared in BOOTSTRAP
         has $!descriptor;
 
         method new(\target, Mu \descriptor) {
-            my \rt = nqp::create(self);
-            nqp::bindattr(rt, self, '$!target', target);
-            nqp::bindattr(rt, self, '$!descriptor', descriptor);
-            rt
+            nqp::stmts(
+              nqp::bindattr((my \rt = nqp::create(self)),
+                self,'$!target',target),
+              nqp::p6bindattrinvres(rt,
+                self,'$!descriptor',descriptor)
+            )
         }
 
         method push(Mu \value) {
@@ -134,68 +140,38 @@ my class Array { # declared in BOOTSTRAP
 
         # everything we need is already there
         elsif nqp::getattr(self,List,'$!reified').DEFINITE {
-            class :: does Iterator {
-                has int $!i;
-                has $!reified;
-                has $!descriptor;
-
-                method !SET-SELF(\array) {
-                    $!i           = -1;
-                    $!reified    := nqp::getattr(array, List,  '$!reified');
-                    $!descriptor := nqp::getattr(array, Array, '$!descriptor');
-                    self
-                }
-                method new(\array) { nqp::create(self)!SET-SELF(array) }
-
-                method pull-one() is raw {
-                    nqp::ifnull(
-                      nqp::atpos($!reified,$!i = nqp::add_i($!i,1)),
-                      nqp::islt_i($!i,nqp::elems($!reified)) # found a hole
-                        ?? nqp::p6bindattrinvres(
-                             (my \v := nqp::p6scalarfromdesc($!descriptor)),
-                             Scalar,
-                             '$!whence',
-                             -> { nqp::bindpos($!reified,$!i,v) }
-                           )
-                        !! IterationEnd
-                    )
-                }
-
-                method push-all($target --> IterationEnd) {
-                    my int $elems = nqp::elems($!reified);
-                    nqp::while(   # doesn't sink
-                      nqp::islt_i($!i = nqp::add_i($!i,1),$elems),
-                      $target.push(nqp::ifnull(
-                        nqp::atpos($!reified,$!i),
-                        nqp::p6bindattrinvres(
-                          (my \v := nqp::p6scalarfromdesc($!descriptor)),
-                          Scalar,
-                          '$!whence',
-                          -> { nqp::bindpos($!reified,$!i,v) }
-                        )
-                      ))
-                    )
-                }
-            }.new(self)
+            Rakudo::Iterator.ReifiedArray(self)
         }
 
         # nothing now or in the future to iterate over
         else {
-            Rakudo::Internals.EmptyIterator
+            Rakudo::Iterator.Empty
         }
     }
     method from-iterator(Array:U: Iterator $iter) {
-        my \result := nqp::create(self);
-        my \buffer := nqp::create(IterationBuffer);
-        my \todo := nqp::create(List::Reifier);
-        nqp::bindattr(result, List, '$!reified', buffer);
-        nqp::bindattr(result, List, '$!todo', todo);
-        nqp::bindattr(todo, List::Reifier, '$!reified', buffer);
-        nqp::bindattr(todo, List::Reifier, '$!current-iter', $iter);
-        nqp::bindattr(todo, List::Reifier, '$!reification-target',
-            result.reification-target());
-        todo.reify-until-lazy();
-        result
+        nqp::if(
+          nqp::eqaddr(
+            $iter.push-until-lazy(
+              my \target := ArrayReificationTarget.new(
+                (my \buffer := nqp::create(IterationBuffer)),
+                nqp::null
+              )
+            ),
+            IterationEnd
+          ),
+          nqp::p6bindattrinvres(nqp::create(self),List,'$!reified',buffer),
+          nqp::stmts(
+            nqp::bindattr((my \result := nqp::create(self)),
+              List,'$!reified',buffer),
+            nqp::bindattr((my \todo := nqp::create(List::Reifier)),
+              List::Reifier,'$!current-iter',$iter),
+            nqp::bindattr(todo,
+              List::Reifier,'$!reified',buffer),
+            nqp::bindattr(todo,
+              List::Reifier,'$!reification-target',target),
+            nqp::p6bindattrinvres(result,List,'$!todo',todo)
+          )
+        )
     }
 
     proto method new(|) { * }
@@ -1059,6 +1035,26 @@ my class Array { # declared in BOOTSTRAP
             )
           ),
           X::Cannot::Lazy.new(:action('splice in')).throw
+        )
+    }
+
+    multi method tail(Array:D: $n) {
+        nqp::if(
+          nqp::getattr(self,List,'$!todo').DEFINITE,
+          self.Any::tail($n),
+          Seq.new(
+            nqp::if(
+              (my $reified := nqp::getattr(self,List,'$!reified')).DEFINITE
+                && nqp::elems($reified),
+              nqp::stmts(
+                (my $iterator :=
+                  Rakudo::Iterator.ReifiedArray(self))
+                  .skip-at-least(nqp::elems($reified) - $n),
+                $iterator
+              ),
+              Rakudo::Iterator.Empty
+            )
+          )
         )
     }
 

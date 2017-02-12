@@ -636,9 +636,36 @@ my class Hash { # declared in BOOTSTRAP
               TValue
             )
         }
+        method IterationBuffer() {
+            nqp::stmts(
+              (my $buffer := nqp::create(IterationBuffer)),
+              nqp::if(
+                nqp::defined(
+                  nqp::getattr(self,Map,'$!storage')
+                ) && nqp::elems(
+                  nqp::getattr(self,Map,'$!storage')
+                ),
+                nqp::stmts(
+                  (my $iterator := nqp::iterator(
+                    nqp::getattr(self,Map,'$!storage')
+                  )),
+                  nqp::setelems($buffer,nqp::elems(
+                    nqp::getattr(self,Map,'$!storage')
+                  )),
+                  (my int $i = -1),
+                  nqp::while(
+                    $iterator,
+                    nqp::bindpos($buffer,($i = nqp::add_i($i,1)),
+                      nqp::iterval(nqp::shift($iterator)))
+                  )
+                )
+              ),
+              $buffer
+            )
+        }
 
         method keys() {
-            Seq.new(class :: does Rakudo::Internals::MappyIterator {
+            Seq.new(class :: does Rakudo::Iterator::Mappy {
                 method pull-one() {
                     nqp::if(
                       $!iter,
@@ -650,7 +677,7 @@ my class Hash { # declared in BOOTSTRAP
             }.new(self))
         }
         method values() {
-            Seq.new(class :: does Rakudo::Internals::MappyIterator {
+            Seq.new(class :: does Rakudo::Iterator::Mappy {
                 method pull-one() {
                     nqp::if(
                       $!iter,
@@ -662,33 +689,11 @@ my class Hash { # declared in BOOTSTRAP
             }.new(self))
         }
         method kv() {
-            Seq.new(class :: does Rakudo::Internals::MappyIterator {
-                has $!pair;
-
-                method pull-one() {
-                    nqp::if(
-                      $!pair,
-                      nqp::stmts(
-                        (my $value := nqp::getattr($!pair,Pair,'$!value')),
-                        ($!pair := nqp::null),
-                        $value
-                      ),
-                      nqp::if(
-                        $!iter,
-                        nqp::getattr(
-                          ($!pair := nqp::iterval(nqp::shift($!iter))),
-                          Pair,'$!key'),
-                        IterationEnd
-                      )
-                    )
-                }
-            }.new(self))
+            Seq.new(Rakudo::Iterator.Mappy-kv-from-pairs(self))
         }
-        method pairs() {
-            Seq.new(Rakudo::Internals.MappyIterator-values(self))
-        }
+        method iterator() { Rakudo::Iterator.Mappy-values(self) }
         method antipairs() {
-            Seq.new(class :: does Rakudo::Internals::MappyIterator {
+            Seq.new(class :: does Rakudo::Iterator::Mappy {
                 method pull-one() {
                     nqp::if(
                       $!iter,
@@ -697,9 +702,6 @@ my class Hash { # declared in BOOTSTRAP
                     )
                  }
             }.new(self))
-        }
-        method invert() {
-            self.map: { .value »=>» .key }
         }
         multi method perl(::?CLASS:D \SELF:) {
             SELF.perlseen('Hash', {

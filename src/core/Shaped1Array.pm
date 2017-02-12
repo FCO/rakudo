@@ -173,20 +173,16 @@
         }
 
         multi method keys(::?CLASS:D:) {
-            Seq.new(
-              Rakudo::Internals.IntRangeIterator(0,self.shape.AT-POS(0) - 1))
+            Seq.new(Rakudo::Iterator.IntRange(0,self.shape.AT-POS(0) - 1))
         }
         multi method kv(::?CLASS:D:) {
-            Seq.new(
-              Rakudo::Internals.IterateKeyValueFromIterator(self.iterator))
+            Seq.new(Rakudo::Iterator.KeyValue(self.iterator))
         }
         multi method pairs(::?CLASS:D:) {
-            Seq.new(
-              Rakudo::Internals.IteratePairFromIterator(self.iterator))
+            Seq.new(Rakudo::Iterator.Pair(self.iterator))
         }
         multi method antipairs(::?CLASS:D:) {
-            Seq.new(
-              Rakudo::Internals.IterateAntiPairFromIterator(self.iterator))
+            Seq.new(Rakudo::Iterator.AntiPair(self.iterator))
         }
 
         method iterator(::?CLASS:D:) {

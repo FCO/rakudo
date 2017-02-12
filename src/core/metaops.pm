@@ -18,8 +18,7 @@ sub METAOP_REVERSE(\op) {
 }
 
 sub METAOP_CROSS(\op, &reduce) {
-    return &infix:<X> if op === &infix:<,>;
-
+    nqp::if(op.prec('thunky').starts-with('.'),
     -> +lol {
         my $rop = lol.elems == 2 ?? op !! &reduce(op);
         my $laze = False;
@@ -71,10 +70,15 @@ sub METAOP_CROSS(\op, &reduce) {
                 }
             }
         }.lazy-if($laze);
+    },
+    -> +lol {
+        Seq.new(Rakudo::Iterator.CrossIterablesOp(lol,op))
     }
+    )
 }
 
 sub METAOP_ZIP(\op, &reduce) {
+   nqp::if(op.prec('thunky').starts-with('.'),
    -> +lol {
         my $arity = lol.elems;
         my $rop = $arity == 2 ?? op !! &reduce(op);
@@ -82,11 +86,11 @@ sub METAOP_ZIP(\op, &reduce) {
         my @loi = eager for lol -> \elem {
             if nqp::iscont(elem) {
                 $laze = False;
-                Rakudo::Internals.WhateverIterator((elem,))
+                Rakudo::Iterator.OneValue(elem)
             }
             else {
                 $laze = False unless elem.is-lazy;
-                Rakudo::Internals.WhateverIterator(elem)
+                Rakudo::Iterator.Whatever(elem.iterator)
             }
         }
         gather {
@@ -101,8 +105,12 @@ sub METAOP_ZIP(\op, &reduce) {
                 last if $z.elems < $arity;
                 take-rw $arity == 2 ?? $rop(|$z) !! $rop(@$z);
             }
-        }.lazy-if($laze);
+        }.lazy-if($laze)
+    },
+    -> +lol {
+        Seq.new(Rakudo::Iterator.ZipIterablesOp(lol,op))
     }
+    )
 }
 
 proto sub METAOP_REDUCE_LEFT(|) { * }
@@ -489,8 +497,8 @@ multi sub HYPER(&operator, Iterable:D \left, Iterable:D \right, :$dwim-left, :$d
     X::HyperOp::Infinite.new(:side<right>, :&operator).throw if right-iterator.is-lazy and
         (not $dwim-right or $dwim-left);
 
-    my \lefti  := Rakudo::Internals.DwimIterator(left-iterator);
-    my \righti := Rakudo::Internals.DwimIterator(right-iterator);
+    my \lefti  := Rakudo::Iterator.DWIM(left-iterator);
+    my \righti := Rakudo::Iterator.DWIM(right-iterator);
 
     my \result := IterationBuffer.new;
     loop {

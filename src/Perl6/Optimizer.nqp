@@ -1415,7 +1415,20 @@ class Perl6::Optimizer {
                         last;
                     }
                 }
-                
+
+                # Don't constant fold the 'x' operator if the resulting string would be too big.
+                # 1024 is just a heuristic, measuring might show a bigger value would be fine.
+                if $all_args_known && $op.name eq '&infix:<x>' && $!symbols.is_from_core('&infix:<x>') {
+                    my int $survived := 0;
+                    my int $size;
+                    try {
+                        $size := @args[0].chars * @args[1];
+                        $survived := 1;
+                    }
+
+                    return $op if $survived && $size > 1024;
+                }
+
                 # If so, attempt to constant fold.
                 if $all_args_known {
                     my int $survived := 0;
@@ -1703,7 +1716,6 @@ class Perl6::Optimizer {
             my $callee_var := QAST::Node.unique('range_callee_');
             $op.shift while $op.list;
             $op.op('stmts');
-            $op.annotate('range_optimized', 1);
             $op.push(QAST::Stmts.new(
                 QAST::Op.new(
                     :op('bind'),
@@ -1758,9 +1770,13 @@ class Perl6::Optimizer {
         # If it's the sink context void node, then only visit the first
         # child. Otherwise, see all.
         if +@($want) == 3 && $want[1] eq 'v' {
+            my $sinker := $want[2];
+            my int $tweak_sinkee := nqp::istype($sinker, QAST::Op)
+                && $sinker.op eq 'p6sink'
+                && $sinker[0] =:= $want[0];
             self.visit_children($want, :first);
-            if $want[0].ann('range_optimized') {
-                $want[2] := $want[0];
+            if $tweak_sinkee {
+                $want[2][0] := $want[0];
             }
         }
         else {

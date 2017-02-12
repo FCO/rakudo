@@ -72,10 +72,10 @@ my class Range is Cool does Iterable does Positional {
     }
     multi method new(\min, \max) { nqp::create(self)!SET-SELF(min,max,0,0,0) }
 
-    method excludes-min() { ?$!excludes-min }
-    method excludes-max() { ?$!excludes-max }
-    method infinite()     { ?$!infinite     }
-    method is-int()       { ?$!is-int       }
+    method excludes-min() { nqp::p6bool($!excludes-min) }
+    method excludes-max() { nqp::p6bool($!excludes-max) }
+    method infinite()     { nqp::p6bool($!infinite)     }
+    method is-int()       { nqp::p6bool($!is-int)       }
 
     multi method WHICH (Range:D:) {
         self.^name
@@ -104,7 +104,7 @@ my class Range is Cool does Iterable does Positional {
         if $!is-int
           && !nqp::isbig_I(nqp::decont($!min))
           && !nqp::isbig_I(nqp::decont($!max)) {
-            Rakudo::Internals.IntRangeIterator(
+            Rakudo::Iterator.IntRange(
               $!min + $!excludes-min, $!max - $!excludes-max)
         }
 
@@ -131,21 +131,23 @@ my class Range is Cool does Iterable does Positional {
 
         # if we have (simple) char range
         elsif nqp::istype($!min,Str) {
-            my $min = $!excludes-min ?? $!min.succ !! $!min;
-            $min after $!max
+            $!min after $!max
               ?? ().iterator
-              !! $min.chars == 1 && nqp::istype($!max,Str) && $!max.chars == 1
+              !! $!min.chars == 1 && nqp::istype($!max,Str) && $!max.chars == 1
                 ?? class :: does Iterator {
                        has int $!i;
                        has int $!n;
 
-                       method !SET-SELF(\from,\end) {
-                           $!i = nqp::ord(nqp::unbox_s(from)) - 1;
-                           $!n = nqp::ord(nqp::unbox_s(end));
+                       method !SET-SELF(\from,\end,\excludes-min,\excludes-max) {
+                           $!i = nqp::ord(nqp::unbox_s(from))
+                               - (excludes-min ?? 0 !! 1);
+                           $!n = nqp::ord(nqp::unbox_s(end))
+                               - (excludes-max ?? 1 !! 0);
                            self
                        }
-                       method new(\from,\end) {
-                           nqp::create(self)!SET-SELF(from,end)
+                       method new(\from,\end,\excludes-min,\excludes-max) {
+                           nqp::create(self)!SET-SELF(
+                              from,end,excludes-min,excludes-max)
                        }
                        method pull-one() {
                            ( $!i = $!i + 1 ) <= $!n
@@ -161,8 +163,11 @@ my class Range is Cool does Iterable does Positional {
                        method count-only() { nqp::p6box_i($!n - $!i) }
                        method bool-only() { nqp::p6bool(nqp::isgt_i($!n,$!i)) }
                        method sink-all(--> IterationEnd) { $!i = $!n }
-                   }.new($min, $!excludes-max ?? $!max.pred !! $!max)
-                !! SEQUENCE($min,$!max,:exclude_end($!excludes-max)).iterator
+                   }.new($!min, $!max, $!excludes-min, $!excludes-max)
+                !! SEQUENCE(
+                       ($!excludes-min ?? $!min.succ !! $!min),
+                       $!max, :exclude_end($!excludes-max)
+                   ).iterator
         }
 
         # General case according to spec
@@ -207,8 +212,9 @@ my class Range is Cool does Iterable does Positional {
                             $i = $i.succ;
                         }
                     }
+                    $!i = $e.succ;
                 }
-                method sink-all(--> IterationEnd) { $!i = $!e }
+                method sink-all(--> IterationEnd) { $!i = $!e.succ }
             }.new($!excludes-min ?? $!min.succ !! $!min,$!excludes-max,$!max)
         }
     }
@@ -364,7 +370,27 @@ my class Range is Cool does Iterable does Positional {
     }
 
     method bounds() { (nqp::decont($!min), nqp::decont($!max)) }
-    method int-bounds() {
+    proto method int-bounds(|) { * }
+    multi method int-bounds($from is rw, $to is rw) {
+        nqp::if(
+          $!is-int,
+          nqp::stmts(
+            ($from = $!min + $!excludes-min),
+            ($to   = $!max - $!excludes-max)
+          ),
+          nqp::if(
+            nqp::istype($!min,Real)
+              && $!min.floor == $!min
+              && nqp::istype($!max,Real),
+            nqp::stmts(
+              ($from = $!min.floor + $!excludes-min),
+              ($to   = $!max.floor - ($!excludes-max && $!max.Int == $!max))
+            ),
+            (die "Cannot determine integer bounds")
+          )
+        )
+    }
+    multi method int-bounds() {
         $!is-int
           ?? ($!min + $!excludes-min, $!max - $!excludes-max)
           !! nqp::istype($!min,Real) && $!min.floor == $!min && nqp::istype($!max,Real)
@@ -396,14 +422,29 @@ my class Range is Cool does Iterable does Positional {
           !! ($!excludes-min ?? got after $!min !! not got before $!min)
                && ($!excludes-max ?? got before $!max !! not got after $!max)
     }
+    multi method ACCEPTS(Range:D: Complex:D \got) {
+        nqp::istype(($_ := got.Real), Failure) ?? False !! nextwith $_
+    }
     multi method ACCEPTS(Range:D: Range \topic) {
-        (topic.min > $!min
-         || topic.min == $!min
-            && !(!topic.excludes-min && $!excludes-min))
-        &&
-        (topic.max < $!max
-         || topic.max == $!max
-            && !(!topic.excludes-max && $!excludes-max))
+        nqp::istype($!min, Numeric)
+            ?? # RHS is a numeric range, use numeric comparators
+                try {
+                    (topic.min > $!min
+                     || topic.min == $!min
+                        && !(!topic.excludes-min && $!excludes-min))
+                    &&
+                    (topic.max < $!max
+                     || topic.max == $!max
+                        && !(!topic.excludes-max && $!excludes-max))
+                } // False # don't explode on failures to coerce to numerics
+            !! # RHS is a stringy range, use stringy comparators
+                (topic.min gt $!min
+                 || topic.min eq $!min
+                    && !(!topic.excludes-min && $!excludes-min))
+                &&
+                (topic.max lt $!max
+                 || topic.max eq $!max
+                    && !(!topic.excludes-max && $!excludes-max))
     }
 
     multi method AT-POS(Range:D: int \pos) {

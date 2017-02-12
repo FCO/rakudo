@@ -20,8 +20,8 @@ my role Rational[::NuT, ::DeT] does Real {
 
         # 0 denominator take it verbatim to support Inf/-Inf/NaN
         if de == 0 {
-            nqp::bindattr($new,self.WHAT,'$!numerator',  nqp::decont(nu));
-            nqp::bindattr($new,self.WHAT,'$!denominator',nqp::decont(de));
+            nqp::bindattr($new,::?CLASS,'$!numerator',  nqp::decont(nu));
+            nqp::bindattr($new,::?CLASS,'$!denominator',nqp::decont(de));
         }
 
         # normalize
@@ -33,8 +33,8 @@ my role Rational[::NuT, ::DeT] does Real {
                 $numerator   = -$numerator;
                 $denominator = -$denominator;
             }
-            nqp::bindattr($new,self.WHAT,'$!numerator',  nqp::decont($numerator));
-            nqp::bindattr($new,self.WHAT,'$!denominator',nqp::decont($denominator));
+            nqp::bindattr($new,::?CLASS,'$!numerator',  nqp::decont($numerator));
+            nqp::bindattr($new,::?CLASS,'$!denominator',nqp::decont($denominator));
         }
 
         $new
@@ -51,14 +51,13 @@ my role Rational[::NuT, ::DeT] does Real {
     }
 
     method floor(Rational:D:) {
-        # correct formula
         $!denominator == 1
             ?? $!numerator
             !! $!numerator div $!denominator
     }
 
     method ceiling(Rational:D:) {
-        # correct formula
+        self.REDUCE-ME;
         $!denominator == 1
             ?? $!numerator
             !! ($!numerator div $!denominator + 1)
@@ -109,6 +108,12 @@ my role Rational[::NuT, ::DeT] does Real {
     }
 
     method base($base, Any $digits? is copy) {
+        # XXX TODO: this $base check can be delegated to Int.base once Num/0 gives Inf/NaN,
+        # instead of throwing (which happens in the .log() call before we reach Int.base
+        2 <= $base <= 36 or Failure.new(X::OutOfRange.new(
+            what => "base argument to base", :got($base), :range<2..36>)
+        );
+
         my $prec;
         if $digits ~~ Whatever {
             $digits = Nil;

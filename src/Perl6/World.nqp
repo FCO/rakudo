@@ -1192,7 +1192,7 @@ class Perl6::World is HLL::World {
         self.add_object($spec);
         my $registry := self.find_symbol(['CompUnit', 'RepositoryRegistry']);
         my $comp_unit := $registry.head.need($spec);
-        my $globalish := $comp_unit.handle.globalish-package.WHO;
+        my $globalish := $comp_unit.handle.globalish-package;
         nqp::gethllsym('perl6','ModuleLoader').merge_globals_lexically(self, $cur_GLOBALish, $globalish);
 
         return $comp_unit;
@@ -1432,7 +1432,7 @@ class Perl6::World is HLL::World {
 
     # Installs a lexical symbol. Takes a QAST::Block object, name and
     # the type of container to install.
-    method install_lexical_container($block, str $name, %cont_info, $descriptor, :$scope, :$package) {
+    method install_lexical_container($block, str $name, %cont_info, $descriptor, :$scope, :$package, :$cont = self.build_container_and_add_to_sc(%cont_info, $descriptor)) {
         # Add to block, if needed. Note that it doesn't really have
         # a compile time value.
         my $var;
@@ -1477,9 +1477,6 @@ class Perl6::World is HLL::World {
             return nqp::null();
         }
 
-        # Build container.
-        my $cont := self.build_container(%cont_info, $descriptor);
-        self.add_object($cont);
         $block.symbol($name, :value($cont));
         self.install_package_symbol_unchecked($package, $name, $cont) if $scope eq 'our';
 
@@ -1524,6 +1521,13 @@ class Perl6::World is HLL::World {
             try nqp::bindattr($cont, %cont_info<container_base>, '$!descriptor', $descriptor);
         }
         $cont
+    }
+
+    # Builds a container and adds it to the SC.
+    method build_container_and_add_to_sc(%cont_info, $descriptor) {
+        my $cont := self.build_container(%cont_info, $descriptor);
+        self.add_object($cont);
+        $cont;
     }
 
     # Given a sigil and the value type specified, works out the
@@ -1677,13 +1681,13 @@ class Perl6::World is HLL::World {
     }
 
     # Installs one of the magical lexicals ($_, $/ and $!). Uses a cache to
-    # avoid massive duplication of container descriptors.
+    # avoid massive duplication of containers and container descriptors.
     method install_lexical_magical($block, $name) {
         my %magical_cds := self.context().magical_cds();
 
         if nqp::existskey(%magical_cds, $name) {
             my $mcd := nqp::atkey(%magical_cds, $name);
-            self.install_lexical_container($block, $name, $mcd[0], $mcd[1]);
+            self.install_lexical_container($block, $name, $mcd[0], $mcd[1], :cont($mcd[2]));
         }
         else {
             my $Mu     := self.find_symbol(['Mu']);
@@ -1701,8 +1705,10 @@ class Perl6::World is HLL::World {
             my $desc :=
               self.create_container_descriptor($Mu, 1, $name, $WHAT, 1);
 
-            %magical_cds{$name} := [%info, $desc];
-            self.install_lexical_container($block, $name, %info, $desc);
+            my $cont := self.build_container_and_add_to_sc(%info, $desc);
+
+            %magical_cds{$name} := [%info, $desc, $cont];
+            self.install_lexical_container($block, $name, %info, $desc, :cont($cont));
         }
     }
 

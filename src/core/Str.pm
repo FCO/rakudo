@@ -144,10 +144,6 @@ my class Str does Stringy { # declared in BOOTSTRAP
         ))
     }
 
-    proto method subst(|) {
-        $/ := nqp::getlexdyn('$/');
-        {*}
-    }
     multi method substr-eq(Str:D: Str:D $needle) {
         nqp::p6bool(nqp::eqat($!value,nqp::getattr($needle,Str,'$!value'),0))
     }
@@ -325,7 +321,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
                     ($!pos = -1),
                     self
                   ),
-                  Rakudo::Internals.EmptyIterator
+                  Rakudo::Iterator.Empty
                 )
             }
             method new(\string) { nqp::create(self)!SET-SELF(string) }
@@ -362,7 +358,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
                     ($!todo  = (inf ?? $!max !! (0 max limit)) + 1),
                     self
                   ),
-                  Rakudo::Internals.EmptyIterator
+                  Rakudo::Iterator.Empty
                 )
             }
             method new(\s,\z,\l,\i) { nqp::create(self)!SET-SELF(s,z,l,i) }
@@ -768,7 +764,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
     method !match-nth-tail(\slash, \cursor, \move, int $tail) {
         nqp::decont(slash = nqp::if(
           nqp::eqaddr((my $pulled :=
-            Rakudo::Internals.IterateLastNFromIterator(
+            Rakudo::Iterator.LastNValues(
               CURSOR-ITERATOR.new(cursor, move),
               $tail, 'match', 1).pull-one),
             IterationEnd
@@ -782,7 +778,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
     method !match-last(\slash, \cursor, \move) {
         nqp::decont(slash = nqp::if(
           nqp::eqaddr((my $pulled :=
-            Rakudo::Internals.LastFromIterator(
+            Rakudo::Iterator.LastValue(
               CURSOR-ITERATOR.new(cursor, move),
               'match')),
             IterationEnd
@@ -835,11 +831,11 @@ my class Str does Stringy { # declared in BOOTSTRAP
                       nqp::iseq_i($i,$todo),
                       nqp::p6bindattrinvres(  # found all values
                         nqp::create(List),List,'$!reified',$matches),
-                      Slip.new                # no match, since not all values
+                      Empty                   # no match, since not all values
                     )
                   )
                 ),
-                Slip.new                      # exhausted while skipping
+                Empty                         # exhausted while skipping
               )
             )
           )
@@ -849,7 +845,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
     # Give list with matches found given an iterator with :nth
     method !match-nth-iterator(\slash, \source, \indexes) {
         nqp::decont(slash = nqp::stmts(
-          Seq.new(Rakudo::Internals.IterateMonotonicFromIterators(
+          Seq.new(Rakudo::Iterator.MonotonicIndexes(
             source, indexes, 1,
             -> $got,$next {
               nqp::if(
@@ -907,7 +903,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
             nqp::elems($matches) >= $min,
             nqp::p6bindattrinvres(
               nqp::create(List),List,'$!reified',$matches),
-            Slip.new
+            Empty
           )
         ))
     }
@@ -1091,6 +1087,10 @@ my class Str does Stringy { # declared in BOOTSTRAP
         }
     }
 
+    proto method subst(|) {
+        $/ := nqp::getlexdyn('$/');
+        {*}
+    }
     multi method subst(Str:D: $matcher, $replacement, :global(:$g),
                        :ii(:$samecase), :ss(:$samespace), :mm(:$samemark),
                        *%options) {
@@ -1301,7 +1301,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
 
     method parse-base(Str:D: Int:D $radix) {
         fail X::Syntax::Number::RadixOutOfRange.new(:$radix)
-            unless 2 <= $radix <= 36;
+            unless 2 <= $radix <= 36; # (0..9,"a".."z").elems == 36
 
         # do not modify $!value directly as that affects other same strings
         my ($value, $sign, $sign-offset) = $!value, 1, 0;
@@ -2891,6 +2891,47 @@ sub UNBASE_BRACKET($base, @a) {
     }
     $v;
 }
+proto sub infix:<unicmp>(|) is pure { * }
+proto sub infix:<coll>(|) { * }
+#?if moar
+multi sub infix:<unicmp>(Str:D \a, Str:D \b) returns Order:D {
+    nqp::isnull(nqp::getlexcaller('EXPERIMENTAL-COLLATION')) and X::Experimental.new(
+        feature => "the 'unicmp' operator",
+        use     => "collation"
+    ).throw;
+    ORDER(
+        nqp::unicmp_s(
+            nqp::unbox_s(a), nqp::unbox_s(b), 15,0,0))
+}
+multi sub infix:<unicmp>(Pair:D \a, Pair:D \b) {
+    (a.key unicmp b.key) || (a.value unicmp b.value)
+}
+multi sub infix:<coll>(Str:D \a, Str:D \b) returns Order:D {
+    nqp::isnull(nqp::getlexcaller('EXPERIMENTAL-COLLATION')) and X::Experimental.new(
+        feature => "the 'coll' operator",
+        use     => "collation"
+    ).throw;
+    ORDER(
+        nqp::unicmp_s(
+            nqp::unbox_s(a), nqp::unbox_s(b), $*COLLATION.collation-level,0,0))
+}
+multi sub infix:<coll>(Cool:D \a, Cool:D \b) returns Order:D {
+    nqp::isnull(nqp::getlexcaller('EXPERIMENTAL-COLLATION')) and X::Experimental.new(
+        feature => "the 'coll' operator",
+        use     => "collation"
+    ).throw;
+    ORDER(
+        nqp::unicmp_s(
+            nqp::unbox_s(a.Str), nqp::unbox_s(b.Str), $*COLLATION.collation-level,0,0))
+}
+multi sub infix:<coll>(Pair:D \a, Pair:D \b) {
+    (a.key coll b.key) || (a.value coll b.value)
+}
+#?endif
+#?if jvm
+multi sub infix:<unicmp>(Str:D \a, Str:D \b) { die "unicmp NYI on JVM" }
+multi sub infix:<coll>(Str:D \a, Str:D \b)   { die "coll NYI on JVM" }
+#?endif
 
 sub chrs(*@c) returns Str:D {
     fail X::Cannot::Lazy.new(action => 'chrs') if @c.is-lazy;

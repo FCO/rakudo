@@ -60,25 +60,25 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
         has &!block;
         has $!source;
         has $!label;
-        has Int $!NEXT;         # SHOULD BE int
-        has Int $!did-init;     # SHOULD BE int
-        has Int $!did-iterate;  # SHOULD BE int
+        has Int $!NEXT;         # SHOULD BE int, but has Int performs better
+        has Int $!did-init;     # SHOULD BE int, but has Int performs better
+        has Int $!did-iterate;  # SHOULD BE int, but has Int performs better
 
-        method new(&block, $source, $label) {
-            my $iter := nqp::create(self);
-            nqp::bindattr($iter, self, '&!block', &block);
-            nqp::bindattr($iter, self, '$!source', $source);
-            nqp::bindattr($iter, self, '$!label',
-              nqp::decont($label));
-            nqp::bindattr($iter, self, '$!NEXT',
-              &block.has-phaser('NEXT'));
-            $iter
+        method !SET-SELF(\block,\source,\label) {
+            nqp::stmts(
+              (&!block  := block),
+              ($!source := source),
+              ($!label  := label),
+              ($!NEXT = block.has-phaser('NEXT')),
+              self
+            )
         }
+        method new(\bl,\sou,\la) { nqp::create(self)!SET-SELF(bl,sou,la) }
 
         method is-lazy() { $!source.is-lazy }
 
         method pull-one() is raw {
-            my int $redo = 1;
+            my int $stopped;
             my $value;
             my $result;
 
@@ -97,46 +97,44 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
                 # $result will be returned at the end
             }
             elsif nqp::eqaddr(($value := $!source.pull-one),IterationEnd) {
-                $result := $value;
-                nqp::if($!did-iterate,&!block.fire_phasers('LAST'));
+                $result := IterationEnd
             }
             else {
-                nqp::while(
-                  $redo,
-                  nqp::stmts(
-                    $redo = 0,
-                    nqp::handle(
-                      nqp::stmts(
-                        ($result := &!block($value)),
-                        ($!did-iterate = 1),
+                nqp::until(
+                  $stopped,
+                  nqp::handle(
+                    nqp::stmts(
+                      ($stopped = 1),
+                      ($result := &!block($value)),
+                      ($!did-iterate = 1),
+                      nqp::if(
+                        nqp::istype($result, Slip),
                         nqp::if(
-                          nqp::istype($result, Slip),
+                          nqp::eqaddr(($result := self.start-slip($result)), IterationEnd),
                           nqp::if(
-                            nqp::eqaddr(($result := self.start-slip($result)), IterationEnd),
-                            nqp::if(
-                              nqp::not_i(nqp::eqaddr(($value := $!source.pull-one),IterationEnd)),
-                              ($redo = 1)
-                            ),
-                          )
-                        ),
-                        nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                            nqp::not_i(nqp::eqaddr(($value := $!source.pull-one),IterationEnd)),
+                            ($stopped = 0)
+                          ),
+                        )
                       ),
-                      'LABELED', $!label,
-                      'NEXT', nqp::stmts(
-                         ($!did-iterate = 1),
-                         nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
-                         nqp::eqaddr(($value := $!source.pull-one), IterationEnd)
-                           ?? ($result := IterationEnd)
-                           !! ($redo = 1)
-                      ),
-                      'REDO', $redo = 1,
-                      'LAST', nqp::stmts(
-                        ($!did-iterate = 1),
-                        ($result := IterationEnd)
-                      )
+                      nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                    ),
+                    'LABELED', $!label,
+                    'NEXT', nqp::stmts(
+                       ($!did-iterate = 1),
+                       nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                       nqp::eqaddr(($value := $!source.pull-one), IterationEnd)
+                         ?? ($result := IterationEnd)
+                         !! ($stopped = 0)
+                    ),
+                    'REDO', ($stopped = 0),
+                    'LAST', nqp::stmts(
+                      ($!did-iterate = 1),
+                      ($result := IterationEnd)
                     )
                   ),
-                  :nohandler);
+                  :nohandler
+                )
             }
             nqp::if(
               $!did-iterate && nqp::eqaddr($result,IterationEnd),
@@ -145,7 +143,7 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
             $result
         }
 
-        method sink-all() {
+        method push-all($target --> IterationEnd) {
             nqp::unless(
               $!did-init,
               nqp::stmts(
@@ -157,52 +155,98 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
               )
             );
 
-            my int $redo;
-            my int $running = 1;
+            my int $stopped;
+            my int $done;
+            my $pulled;
             my $value;
-            while $running {
-                nqp::eqaddr(($value := $!source.pull-one()), IterationEnd)
-                  ?? nqp::stmts(
-                       ($running = 0),
-                       nqp::if(
-                         $!did-iterate,
-                         &!block.fire_phasers('LAST')
-                       );
-                     )
-                  !! nqp::stmts(
-                       ($redo = 1),
-                       nqp::while(
-                         $redo,
-                         nqp::stmts(
-                           $redo = 0,
-                           nqp::handle(
-                             nqp::stmts(  # doesn't sink
-                               (&!block($value)),
-                               ($!did-iterate = 1),
-                               nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
-                             ),
-                             'LABELED', $!label,
-                             'NEXT', nqp::stmts(
-                               ($!did-iterate = 1),
-                               nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
-                               nqp::eqaddr(($value := $!source.pull-one), IterationEnd)
-                                 ?? ($running = 0)
-                                 !! ($redo = 1)),
-                             'REDO', $redo = 1,
-                             'LAST', nqp::stmts(
-                               ($!did-iterate = 1),
-                               ($running = 0))
-                           )  
-                         ),
-                         :nohandler
-                       ),
-                       nqp::if(
-                         nqp::not_i($running) && $!did-iterate,
-                         &!block.fire_phasers('LAST')
-                       )
-                     );
+            until $done
+                || nqp::eqaddr(($value := $!source.pull-one),IterationEnd) {
+                nqp::stmts(
+                  ($stopped = 0),
+                  nqp::until(
+                    $stopped,
+                    nqp::stmts(
+                      ($stopped = 1),
+                      nqp::handle(
+                        nqp::stmts(  # doesn't sink
+                          ($pulled := &!block($value)),
+                          ($!did-iterate = 1),
+                          nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                          nqp::if(
+                            nqp::istype($pulled,Slip),
+                            self.slip-all($pulled,$target),
+                            $target.push($pulled)
+                          )
+                        ),
+                        'LABELED', $!label,
+                        'NEXT', nqp::stmts(
+                          ($!did-iterate = 1),
+                          nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                          nqp::eqaddr(
+                            ($value := $!source.pull-one),
+                            IterationEnd
+                          )
+                            ?? ($done = 1)
+                            !! ($stopped = 0)),
+                        'REDO', ($stopped = 0),
+                        'LAST', ($done = $!did-iterate = 1)
+                      )
+                    ),
+                    :nohandler
+                  )
+                )
             }
-            IterationEnd
+            nqp::if($!did-iterate,&!block.fire_phasers('LAST'))
+        }
+
+        method sink-all(--> IterationEnd) {
+            nqp::unless(
+              $!did-init,
+              nqp::stmts(
+                ($!did-init = 1),
+                nqp::if(
+                  &!block.has-phaser('FIRST'),
+                  nqp::p6setfirstflag(&!block)
+                )
+              )
+            );
+
+            my int $stopped;
+            my int $done;
+            my $value;
+            until $done
+                || nqp::eqaddr(($value := $!source.pull-one()),IterationEnd) {
+                nqp::stmts(
+                  ($stopped = 0),
+                  nqp::until(
+                    $stopped,
+                    nqp::stmts(
+                      ($stopped = 1),
+                      nqp::handle(
+                        nqp::stmts(  # doesn't sink
+                          (&!block($value)),
+                          ($!did-iterate = 1),
+                          nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                        ),
+                        'LABELED', $!label,
+                        'NEXT', nqp::stmts(
+                          ($!did-iterate = 1),
+                          nqp::if($!NEXT, &!block.fire_phasers('NEXT')),
+                          nqp::eqaddr(
+                            ($value := $!source.pull-one),
+                            IterationEnd
+                          )
+                            ?? ($done = 1)
+                            !! ($stopped = 0)),
+                        'REDO', ($stopped = 0),
+                        'LAST', ($done = $!did-iterate = 1)
+                      )
+                    ),
+                    :nohandler
+                  )
+                )
+            }
+            nqp::if($!did-iterate,&!block.fire_phasers('LAST'))
         }
     }
 
@@ -222,106 +266,75 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
         method is-lazy() { $!source.is-lazy }
 
         method pull-one() is raw {
-            my $pulled;
-            my int $redo;
-            my $result;
-# for some reason, this scope is needed.  Otherwise, settings compilation
-# will end in the mast stage with something like:
-#   Cannot reference undeclared local '__lowered_lex_3225'
-{
-            nqp::if(
-              nqp::eqaddr(($pulled := $!source.pull-one),IterationEnd),
-              IterationEnd,
-              nqp::stmts(
-                ($redo = 1),
-                nqp::while(
-                  $redo,
-                  nqp::stmts(
-                    ($redo = 0),
-                    nqp::handle(
-                      ($result := &!block($pulled)),
-                      'LABELED',
-                      $!label,
-                      'NEXT',
-                      nqp::if(
-                        nqp::eqaddr(
-                          ($pulled := $!source.pull-one),IterationEnd),
-                        ($result := IterationEnd),
-                        ($redo = 1)
+            if nqp::eqaddr((my $pulled := $!source.pull-one),IterationEnd) {
+                IterationEnd
+            }
+            else {
+                my $result;
+                nqp::stmts(
+                  nqp::until(
+                    (my int $stopped),
+                    nqp::stmts(
+                      ($stopped = 1),
+                      nqp::handle(
+                        ($result := &!block($pulled)),
+                        'LABELED', $!label,
+                        'NEXT', nqp::if(
+                          nqp::eqaddr(
+                            ($pulled := $!source.pull-one),
+                            IterationEnd
+                          ),
+                          ($result := IterationEnd),
+                          ($stopped = 0)
+                        ),
+                        'REDO', ($stopped = 0),
+                        'LAST', ($result := IterationEnd)
                       ),
-                      'REDO',
-                      ($redo = 1),
-                      'LAST',
-                      ($result := IterationEnd)
                     ),
+                    :nohandler
                   ),
-                  :nohandler
-                ),
-                $result
-              )
-            )
-} # needed for some reason
+                  $result
+                )
+            }
         }
 
         method push-all($target --> IterationEnd) {
             my $pulled;
-            my int $redo;
-# for some reason, this scope is needed.  Otherwise, settings compilation
-# will end in the mast stage with something like:
-#   Cannot reference undeclared local '__lowered_lex_3225'
-{
             nqp::until(
               nqp::eqaddr(($pulled := $!source.pull-one),IterationEnd),
-              nqp::stmts(
-                ($redo = 1),
-                nqp::while(
-                  $redo,
-                  nqp::stmts(
-                    ($redo = 0),
-                    nqp::handle(
-                      $target.push(&!block($pulled)),
-                      'LABELED',
-                      $!label,
-                      'REDO',
-                      ($redo = 1),
-                      'LAST',
-                      return
-                    )
-                  ),
-                  :nohandler
-                )
+              nqp::until(
+                (my int $stopped),
+                nqp::stmts(
+                  ($stopped = 1),
+                  nqp::handle(
+                    $target.push(&!block($pulled)),
+                    'LABELED', $!label,
+                    'REDO', ($stopped = 0),
+                    'LAST', return
+                  )
+                ),
+                :nohandler
               )
             )
-} # needed for some reason
         }
 
         method sink-all(--> IterationEnd) {
+            my $pulled;
             nqp::until(
-              nqp::eqaddr((my $pulled := $!source.pull-one),IterationEnd),
-# for some reason, this scope is needed.  Otherwise, settings compilation
-# will end in the mast stage with something like:
-#   Cannot reference undeclared local '__lowered_lex_3225'
-{
-              nqp::stmts(
-                (my int $redo = 1),
-                nqp::while(
-                  $redo,
-                  nqp::stmts(
-                    ($redo = 0),
-                    nqp::handle(
-                      &!block($pulled),
-                      'LABELED',
-                      $!label,
-                      'REDO',
-                      ($redo = 1),
-                      'LAST',
-                      return
-                    )
-                  ),
-                  :nohandler
-                )
+              nqp::eqaddr(($pulled := $!source.pull-one),IterationEnd),
+              nqp::until(
+                (my int $stopped),
+                nqp::stmts(
+                  ($stopped = 1),
+                  nqp::handle(
+                    &!block($pulled),
+                    'LABELED', $!label,
+                    'REDO', ($stopped = 0),
+                    'LAST', return
+                  )
+                ),
+                :nohandler
               )
-} # needed for some reason
             )
         }
     }
@@ -399,15 +412,17 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
             $result
         }
 
-        method push-all($target) {
+        method push-all($target --> IterationEnd) {
+
+# This extra scope serves no other purpose than to make this method JIT
+# and OSR faster.
+{
             my int $redo;
             my $value;
             my $result;
 
             nqp::until(
-              nqp::eqaddr(
-                ($value := $!source.pull-one),IterationEnd
-              ),
+              nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
               nqp::stmts(
                 ($redo = 1),
                 nqp::while(
@@ -416,75 +431,51 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
                     ($redo = 0),
                     nqp::handle(
                       nqp::if(
-                        nqp::istype(
-                          ($result := &!block($value)),Slip
-                        ) && nqp::defined($result),
-                        $result.iterator.push-all($target),
+                        nqp::istype(($result := &!block($value)),Slip),
+                        self.slip-all($result,$target),
                         $target.push($result)
                       ),
-                      'LABELED',
-                      $!label,
-                      'REDO',
-                      ($redo = 1),
-                      'LAST',
-                      (return IterationEnd)
+                      'LABELED', $!label,
+                      'REDO', ($redo = 1),
+                      'LAST', (return IterationEnd),
                     )
                   ),
                   :nohandler
                 )
               )
-            );
-            IterationEnd
+            )
+} # needed for faster JITting and OSRing
         }
 
-        method sink-all() {
+        method sink-all(--> IterationEnd) {
+
+# This extra scope serves no other purpose than to make this method JIT
+# and OSR faster.
+{
             my int $redo;
-            my int $running = 1;
             my $value;
 
-# for some reason, this scope is needed.  Otherwise, settings compilation
-# will end in the mast stage with something like:
-#   Cannot reference undeclared local '__lowered_lex_3225'
-{
-            nqp::while(
-              $running,
-              nqp::if(
-                nqp::eqaddr(
-                  ($value := $!source.pull-one()),IterationEnd
-                ),
-                ($running = 0),
-                nqp::stmts(
-                  ($redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      $redo = 0,
-                      nqp::handle(  # doesn't sink
-                        (&!block($value)),
-                        'LABELED',
-                        $!label,
-                        'NEXT',
-                        nqp::if(
-                          nqp::eqaddr(
-                            ($value := $!source.pull-one),
-                            IterationEnd
-                          ),
-                          ($running = 0),
-                          ($redo = 1)
-                        ),
-                        'REDO',
-                        ($redo = 1),
-                        'LAST',
-                        ($running = 0)
-                      )
+            nqp::until(
+              nqp::eqaddr(($value := $!source.pull-one()),IterationEnd),
+              nqp::stmts(
+                ($redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(  # doesn't sink
+                      &!block($value),
+                      'LABELED', $!label,
+                      'NEXT', nqp::null,  # need NEXT for next LABEL support
+                      'REDO', ($redo = 1),
+                      'LAST', (return IterationEnd)
                     ),
                   :nohandler
                   )
                 )
               )
-            );
-} # needed for some reason
-            IterationEnd
+            )
+} # needed for faster JITting and OSRing
         }
     }
 
@@ -567,16 +558,18 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
             $result
         }
 
-        method push-all($target) {
+        method push-all($target --> IterationEnd) {
+
+# This extra scope serves no other purpose than to make this method JIT
+# and OSR faster.
+{
             my int $redo;
             my $value;
             my $value2;
             my $result;
 
             nqp::until(
-              nqp::eqaddr(
-                ($value := $!source.pull-one),IterationEnd
-              ),
+              nqp::eqaddr(($value := $!source.pull-one),IterationEnd),
               nqp::stmts(
                 ($redo = 1),
                 nqp::while(
@@ -585,96 +578,80 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
                     ($redo = 0),
                     nqp::handle(
                       nqp::if(
-                        nqp::eqaddr(($value2 := $!source.pull-one),IterationEnd),
+                        nqp::eqaddr(
+                          ($value2 := $!source.pull-one),
+                          IterationEnd
+                        ),
                         nqp::stmts(
                           ($result := &!block($value)),
                           nqp::if(
-                            (nqp::istype($result,Slip) && nqp::defined($result)),
-                            $result.iterator.push-all($target),
+                            nqp::istype($result,Slip),
+                            self.slip-all($result,$target),
                             $target.push($result)
                           ),
                           (return IterationEnd)
                         ),
-                        nqp::stmts(
-                          ($result := &!block($value,$value2)),
-                          nqp::if(
-                            (nqp::istype($result,Slip) && nqp::defined($result)),
-                            $result.iterator.push-all($target),
-                            $target.push($result)
-                          )
+                        nqp::if(
+                          nqp::istype(
+                            ($result := &!block($value,$value2)),
+                            Slip
+                          ),
+                          self.slip-all($result,$target),
+                          $target.push($result)
                         )
                       ),
-                      'LABELED',
-                      $!label,
-                      'REDO',
-                      ($redo = 1),
-                      'LAST',
-                      (return IterationEnd)
+                      'LABELED', $!label,
+                      'REDO', ($redo = 1),
+                      'LAST', (return IterationEnd)
                     )
                   ),
                   :nohandler
                 )
               )
-            );
-            IterationEnd
+            )
+} # needed for faster JITting and OSRing
         }
 
-        method sink-all() {
+        method sink-all(--> IterationEnd) {
+
+# This extra scope serves no other purpose than to make this method JIT
+# and OSR faster.
+{
             my int $redo;
-            my int $running = 1;
             my $value;
             my $value2;
 
-# for some reason, this scope is needed.  Otherwise, settings compilation
-# will end in the mast stage with something like:
-#   Cannot reference undeclared local '__lowered_lex_3225'
-{
-            nqp::while(
-              $running,
-              nqp::if(
-                nqp::eqaddr(
-                  ($value := $!source.pull-one()),IterationEnd
-                ),
-                ($running = 0),
-                nqp::stmts(
-                  ($redo = 1),
-                  nqp::while(
-                    $redo,
-                    nqp::stmts(
-                      $redo = 0,
-                      nqp::handle(  # doesn't sink
-                        nqp::if(
-                          nqp::eqaddr(($value2 := $!source.pull-one),IterationEnd),
-                          nqp::stmts(
-                            (&!block($value)),
-                            (return IterationEnd)
-                          ),
-                          (&!block($value,$value2))
+            nqp::until(
+              nqp::eqaddr(($value := $!source.pull-one()),IterationEnd),
+              nqp::stmts(
+                ($redo = 1),
+                nqp::while(
+                  $redo,
+                  nqp::stmts(
+                    ($redo = 0),
+                    nqp::handle(  # doesn't sink
+                      nqp::if(
+                        nqp::eqaddr(
+                          ($value2 := $!source.pull-one),
+                          IterationEnd
                         ),
-                        'LABELED',
-                        $!label,
-                        'NEXT',
-                        nqp::if(
-                          nqp::eqaddr(
-                            ($value := $!source.pull-one),
-                            IterationEnd
-                          ),
-                          ($running = 0),
-                          ($redo = 1)
+                        nqp::stmts(
+                          (&!block($value)),
+                          (return IterationEnd)
                         ),
-                        'REDO',
-                        ($redo = 1),
-                        'LAST',
-                        ($running = 0)
-                      )
-                    ),
-                  :nohandler
-                  )
+                        (&!block($value,$value2))
+                      ),
+                      'LABELED', $!label,
+                      'NEXT', nqp::null,  # need NEXT for next LABEL support
+                      'REDO', ($redo = 1),
+                      'LAST', (return IterationEnd)
+                    )
+                  ),
+                :nohandler
                 )
               )
-            );
-} # needed for some reason
-            IterationEnd
+            )
+} # needed for faster JITting and OSRing
         }
     }
 
@@ -920,41 +897,15 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
         method is-lazy() { $!iter.is-lazy }
     }
     method !grep-callable(Callable:D $test) {
-        if ($test.count == 1) {
-            $test.?has-phasers
-              ?? self.map({ $_ if $test($_) })  # cannot go fast
-              !! Seq.new(class :: does Grepper {
-                     method pull-one() is raw {
-                         nqp::until(
-                           nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd)
-                             || nqp::handle(
-                                  $!test($_),
-                                  'LAST', ($_ := IterationEnd)
-                                ),
-                           nqp::null
-                         );
-                         $_
-                     }
-                     method push-all($target) {
-                         nqp::until(
-                           nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd),
-                           nqp::if(  # doesn't sink
-                             $!test($_),
-                             $target.push($_)
-                           )
-                         );
-                         IterationEnd
-                     }
-                     method sink-all() {
-                         nqp::until(
-                           nqp::eqaddr(($_ := $!iter.pull-one),IterationEnd),
-                           $!test($_)
-                         );
-                         IterationEnd
-                     }
-                 }.new(self, $test))
-        } else {
-            my role CheatArity {
+        nqp::if(
+          $test.count == 1,
+          sequential-map(
+            self.iterator,
+            { nqp::if($test($_),$_,Empty) },
+            Any)
+          ,
+          nqp::stmts(
+            (my role CheatArity {
                 has $!arity;
                 has $!count;
 
@@ -965,18 +916,16 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
 
                 method arity(Code:D:) { $!arity }
                 method count(Code:D:) { $!count }
-            }
-
-            my &tester = -> |c {
+            }),
+            (my &tester = -> |c {
                 #note "*cough* {c.perl} -> {$test(|c).perl}";
                 next unless $test(|c);
                 c.list
-            } but CheatArity;
-
-            &tester.set-cheat($test.arity, $test.count);
-
-            self.map(&tester);
-        }
+            } but CheatArity),
+            &tester.set-cheat($test.arity, $test.count),
+            self.map(&tester)
+          )
+        )
     }
     method !grep-accepts(Mu $test) {
         Seq.new(class :: does Grepper {
@@ -1217,10 +1166,10 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
           )
         )
     }
-    method !iterator-and-first($what,\first) is raw {
+    method !iterator-and-first($action,\first) is raw {
         nqp::if(
           self.is-lazy,
-          (die "Cannot $what on an infinite list"),
+          X::Cannot::Lazy.new(:$action).throw,
           nqp::stmts(
             (my $iterator := self.iterator),
             nqp::until(
@@ -1460,7 +1409,7 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
             IterationEnd
           ),
           Seq.new(
-            Rakudo::Internals.ReifiedListIterator(
+            Rakudo::Iterator.ReifiedList(
               Rakudo::Internals.MERGESORT-REIFIED-LIST(
                 nqp::p6bindattrinvres(nqp::create(List),List,'$!reified',$list)
               )
@@ -1479,7 +1428,7 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
             X::Cannot::Lazy.new(:action<sort>).throw
           ),
           Seq.new(
-            Rakudo::Internals.ReifiedListIterator(
+            Rakudo::Iterator.ReifiedList(
               nqp::if(
                 nqp::eqaddr(&by,&infix:<cmp>),
                 Rakudo::Internals.MERGESORT-REIFIED-LIST(
@@ -1501,6 +1450,21 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
                 )
               )
             )
+          )
+        )
+    }
+
+    method collate {
+        self.sort(&[coll]);
+    }
+    sub find-reducer-for-op(&op) {
+        nqp::if(
+          nqp::iseq_s(&op.prec("prec"),"f="),
+          &METAOP_REDUCE_LISTINFIX,
+          nqp::if(
+            nqp::iseq_i(nqp::chars(my str $assoc = &op.prec("assoc")),0),
+            &METAOP_REDUCE_LEFT,
+            ::(nqp::concat('&METAOP_REDUCE_',nqp::uc($assoc)))
           )
         )
     }
@@ -1750,7 +1714,7 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
                         $!first = 0;
                     }
                     else {
-                        until !with($!last_as, $which) or ($value := $!iter.pull-one) =:= IterationEnd { 
+                        until !with($!last_as, $which) or ($value := $!iter.pull-one) =:= IterationEnd {
                             $!last_as = $which;
                             $which := &!as($value);
                         }
@@ -1885,13 +1849,9 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
           $pulled
         )
     }
-    multi method head(Any:D: Int(Cool) $n) {
+    multi method head(Any:D: $n) {
         Seq.new(
-          nqp::if(
-            nqp::isle_i($n,0),
-            Rakudo::Internals.EmptyIterator,
-            Rakudo::Internals.IterateNextNFromIterator(self.iterator,$n)
-          )
+          Rakudo::Iterator.NextNValues(self.iterator,$n)
         )
     }
 
@@ -1899,16 +1859,17 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
     multi method tail(Any:D:) is raw {
         nqp::if(
           nqp::eqaddr((my $pulled :=
-            Rakudo::Internals.LastFromIterator(self.iterator,'tail')),
+            Rakudo::Iterator.LastValue(self.iterator,'tail')),
             IterationEnd
           ),
           Nil,
           $pulled
         )
     }
-    multi method tail(Any:D: Int(Cool) $n) {
+    multi method tail(Any:D: $n) {
         Seq.new(
-          Rakudo::Internals.IterateLastNFromIterator(self.iterator,$n,'tail'))
+          Rakudo::Iterator.LastNValues(self.iterator,$n,'tail')
+        )
     }
 
     proto method minpairs(|) { * }
@@ -1944,6 +1905,26 @@ Did you mean to add a stub (\{...\}) or did you mean to .classify?"
         }
         @found
     }
+
+    proto method batch(|) is nodal { * }
+    multi method batch(Any:D: Int:D :$elems!) {
+        Seq.new(Rakudo::Iterator.Batch(self.iterator,$elems,1))
+    }
+    multi method batch(Any:D: Int:D $batch) {
+        Seq.new(Rakudo::Iterator.Batch(self.iterator,$batch,1))
+    }
+
+    proto method rotor(|) is nodal { * }
+    multi method rotor(Any:D: Int:D $batch, :$partial) {
+        Seq.new(Rakudo::Iterator.Batch(self.iterator,$batch,$partial))
+    }
+    multi method rotor(Any:D: *@cycle, :$partial) {
+        Seq.new(Rakudo::Iterator.Rotor(self.iterator,@cycle,$partial))
+    }
+
+    proto method skip(|) { * }
+    multi method skip()         { Seq.new(self.iterator).skip }
+    multi method skip(Int() $n) { Seq.new(self.iterator).skip($n) }
 }
 
 BEGIN Attribute.^compose;
@@ -1999,13 +1980,9 @@ proto sub repeated(|) { * }
 multi sub repeated(+values, |c) { my $laze = values.is-lazy; values.repeated(|c).lazy-if($laze) }
 
 proto sub sort(|) {*}
-multi sub sort(@values) {
-    @values.sort
-}
-multi sub sort($cmp, +values) {
-    nqp::istype($cmp, Callable)
-        ?? values.sort($cmp)
-        !! (|$cmp,|values).sort;
-}
+multi sub sort(&by, @values) { @values.sort(&by) }
+multi sub sort(&by, +values) { values.sort(&by) }
+multi sub sort(@values)      { @values.sort }
+multi sub sort(+values)      { values.sort }
 
 # vim: ft=perl6 expandtab sw=4

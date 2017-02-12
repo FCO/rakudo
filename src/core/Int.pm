@@ -154,11 +154,6 @@ my class Int does Real { # declared in BOOTSTRAP
 
     method narrow(Int:D:) { self }
 
-    my constant $?BITS = do {
-        my int $a = 0x1ffffffff;
-        nqp::iseq_i($a,8589934591) ?? 64 !! 32;
-    }
-
     method Range(Int:U:) {
         given self {
             when int  { $?BITS == 64 ??  int64.Range !!  int32.Range }
@@ -208,7 +203,7 @@ multi sub prefix:<-->(int $a is rw) {
     $a = nqp::sub_i($a, 1);
 }
 multi sub postfix:<++>(Int:D $a is rw) {
-    my \b = nqp::decont($a);
+    my \b := nqp::decont($a);
     $a = nqp::add_I(b, 1, Int);
     b
 }
@@ -218,7 +213,7 @@ multi sub postfix:<++>(int $a is rw) {
     $b
 }
 multi sub postfix:<-->(Int:D $a is rw) {
-    my \b = nqp::decont($a);
+    my \b := nqp::decont($a);
     $a = nqp::sub_I(b, 1, Int);
     b
 }
