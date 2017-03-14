@@ -4412,7 +4412,7 @@ grammar Perl6::Grammar is HLL::Grammar does STD {
         || <?before '::' <.-[=]>> { self.typed_panic: "X::Syntax::ConditionalOperator::SecondPartInvalid", second-part => "::" }
         || <?before ':' <.-[=\w]>> { self.typed_panic: "X::Syntax::ConditionalOperator::SecondPartInvalid", second-part => ":" }
         || <infixish> { self.typed_panic: "X::Syntax::ConditionalOperator::PrecedenceTooLoose", operator => ~$<infixish> }
-        || <?{ ~$<EXPR> ~~ / $*GOAL / }> { self.typed_panic: "X::Syntax::ConditionalOperator::SecondPartGobbled" }
+        || <?{ ~$<EXPR> ~~ / $*GOAL / }> { self.typed_panic: "X::Syntax::ConditionalOperator::SecondPartGobbled", last-part => $*GOAL}
         || <?before \N*? [\n\N*?]? $*GOAL> { self.typed_panic: "X::Syntax::Confused", reason => "Confused: Bogus code found before the !! of conditional operator" }
         || { self.typed_panic: "X::Syntax::Confused", reason => "Confused: Found $<sym> but no $*GOAL" }
         ]

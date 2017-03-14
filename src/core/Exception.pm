@@ -1404,7 +1404,8 @@ my class X::Syntax::ConditionalOperator::PrecedenceTooLoose does X::Syntax {
 }
 
 my class X::Syntax::ConditionalOperator::SecondPartGobbled does X::Syntax {
-    method message() { "Your !! was gobbled by the expression in the middle; please parenthesize" }
+    has $.last-part;
+    method message() { "Your {$!last-part} was gobbled by the expression in the middle; please parenthesize" }
 }
 
 my class X::Syntax::ConditionalOperator::SecondPartInvalid does X::Syntax {
