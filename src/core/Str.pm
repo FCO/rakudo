@@ -139,10 +139,12 @@ my class Str does Stringy { # declared in BOOTSTRAP
         $chars > 0 ?? nqp::p6box_s(nqp::substr($!value,0,$chars)) !! '';
     }
 
+    proto method starts-with(|) {*}
     multi method starts-with(Str:D: Str:D $needle) {
         nqp::p6bool(nqp::eqat($!value,nqp::getattr($needle,Str,'$!value'),0))
     }
 
+    proto method ends-with(|) {*}
     multi method ends-with(Str:D: Str:D $suffix) {
         nqp::p6bool(nqp::eqat(
           $!value,
@@ -151,6 +153,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
         ))
     }
 
+    proto method substr-eq(|) {*}
     multi method substr-eq(Str:D: Str:D $needle) {
         nqp::p6bool(nqp::eqat($!value,nqp::getattr($needle,Str,'$!value'),0))
     }
@@ -163,6 +166,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
         )
     }
 
+    proto method contains(|) {*}
     multi method contains(Str:D: Str:D $needle) {
         nqp::p6bool(nqp::isne_i(
           nqp::index($!value,nqp::getattr($needle,Str,'$!value'),0),-1
@@ -178,6 +182,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
         )
     }
 
+    proto method indices(|) {*}
     multi method indices(Str:D: Str:D $needle, :$overlap) {
         nqp::stmts(
           (my $need    := nqp::getattr($needle,Str,'$!value')),
@@ -219,6 +224,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
         )
     }
 
+    proto method index(|) {*}
     multi method index(Str:D: Str:D $needle) {
         nqp::if(
           nqp::islt_i((my int $i =
@@ -255,6 +261,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
         )
     }
 
+    proto method rindex(|) {*}
     multi method rindex(Str:D: Str:D $needle) {
         nqp::if(
           nqp::islt_i((my int $i =
@@ -1058,6 +1065,10 @@ my class Str does Stringy { # declared in BOOTSTRAP
         )
     }
 
+    proto method subst-mutate(|) {
+        $/ := nqp::getlexdyn('$/');
+        {*}
+    }
     multi method subst-mutate(
       Str:D $self is rw: $matcher, $replacement,
       :ii(:$samecase), :ss(:$samespace), :mm(:$samemark), *%options
