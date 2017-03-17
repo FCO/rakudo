@@ -225,7 +225,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
     }
 
     proto method index(|) {*}
-    multi method index(Str:D: Str:D $needle) {
+    multi method index(Str:D: Str(Cool:D) $needle) {
         nqp::if(
           nqp::islt_i((my int $i =
             nqp::index($!value,nqp::getattr($needle,Str,'$!value'))),
@@ -235,7 +235,7 @@ my class Str does Stringy { # declared in BOOTSTRAP
           nqp::p6box_i($i)
         )
     }
-    multi method index(Str:D: Str:D $needle, Int:D $pos) {
+    multi method index(Str:D: Str(Cool:D) $needle, Int:D $pos) {
         nqp::if(
           nqp::isbig_I(nqp::decont($pos)),
           Failure.new(X::OutOfRange.new(
