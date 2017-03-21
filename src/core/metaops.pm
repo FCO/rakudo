@@ -416,20 +416,18 @@ multi sub METAOP_REDUCE_LIST(\op) {
 
 proto sub METAOP_REDUCE_LISTINFIX(|) { * }
 multi sub METAOP_REDUCE_LISTINFIX(\op, \triangle) {
-    sub (|values) {
-        my \p = values[0];
-        return () unless p.elems;
-
-        my int $i;
+    sub (+values) {
         GATHER({
-            my @list;
-            while $i < p.elems {
-                @list.append(p[$i]);
-                $i = $i + 1;
-                take op.(|@list);
+            my @val = $[values.[0]];
+            take @val;
+            note(@val);
+            for @(values.skip) -> \v {
+                @val.push(v);
+                take op.(|@val.map({nqp::decont($_)}));
+                note(@val);
             }
-        }).lazy-if(p.is-lazy);
-    }
+        }).lazy-if(values.is-lazy)
+    };
 }
 multi sub METAOP_REDUCE_LISTINFIX(\op) {
     sub (+values) {
