@@ -203,7 +203,11 @@ sub MD-HASH-SLICE-ONE-POSITION(\SELF, \indices, \idx, int $dim, \target) {
 multi sub postcircumfix:<{; }>(\SELF, @indices) {
     my \target = IterationBuffer.new;
     MD-HASH-SLICE-ONE-POSITION(SELF, @indices, @indices.AT-POS(0), 0, target);
-    nqp::p6bindattrinvres(nqp::create(List), List, '$!reified', target)
+    nqp::if(
+        nqp::iseq_I(target.elems, 1),
+        target.AT-POS(0),
+        nqp::p6bindattrinvres(nqp::create(List), List, '$!reified', target);
+    )
 }
 
 multi sub postcircumfix:<{; }>(\SELF, @indices, :$exists!) {
