@@ -312,8 +312,26 @@ my class Hash { # declared in BOOTSTRAP
     }
 
     proto method classify-list(|) {*}
-    multi method classify-list( &test, \list, :&as ) {
+    multi method classify-list( &test, \list, :&as, :&reduce is copy, :$initial-value is copy ) {
         fail X::Cannot::Lazy.new(:action<classify>) if list.is-lazy;
+        if not &reduce {
+            &reduce = sub (\agg, \value) {
+                [|agg, value]
+            }
+            $initial-value = [];
+        }
+
+        my &set-value = sub ($lock, %h, Any \key, \value) {
+            $lock.protect: {
+                if %h{key}:exists {
+                    %h{key} = reduce(%h{key}, value);
+                } elsif $initial-value.DEFINITE {
+                    %h{key} = reduce($initial-value.clone, value);
+                } else {
+                    %h{key} = value;
+                }
+            }
+        }
         my \iter = (nqp::istype(list, Iterable) ?? list !! list.list).iterator;
         my $value := iter.pull-one;
         unless $value =:= IterationEnd {
@@ -336,7 +354,8 @@ my class Hash { # declared in BOOTSTRAP
                     my $last := @keys.pop;
                     my $hash  = self;
                     $hash = $hash{$_} //= self.new for @keys;
-                    $hash{$last}.push(&as ?? as($value) !! $value);
+                    my Lock $lock .= new;
+                    set-value $lock, $hash, $last, &as ?? as($value) !! $value;
                     last if ($value := iter.pull-one) =:= IterationEnd;
                     $tested := test($value);
                 };
@@ -344,7 +363,8 @@ my class Hash { # declared in BOOTSTRAP
             # just a simple classify
             else {
                 loop {
-                    self{$tested}.push(&as ?? as($value) !! $value);
+                    my Lock $lock .= new;
+                    set-value $lock, self, $tested, &as ?? as($value) !! $value;
                     last if ($value := iter.pull-one) =:= IterationEnd;
                     nqp::istype(($tested := test($value)), Iterable)
                         and X::Invalid::ComputedValue.new(

@@ -134,11 +134,11 @@ my class Any { # declared in BOOTSTRAP
     multi method classify(Whatever) {
         die "Doesn't make sense to classify with itself";
     }
-    multi method classify($test, :$into!, :&as)   {
-        ( $into // $into.new ).classify-list( $test, self, :&as);
+    multi method classify($test, :$into!, :&as, :&reduce)   {
+        ( $into // $into.new ).classify-list( $test, self, :&as, :&reduce);
     }
-    multi method classify($test, :&as)   {
-        Hash.^parameterize(Any,Any).new.classify-list( $test, self, :&as );
+    multi method classify($test, :&as, :&reduce, :$initial-value)   {
+        Hash.^parameterize(Any,Any).new.classify-list( $test, self, :&as, :&reduce, :$initial-value );
     }
 
     proto method categorize(|) is nodal {*}
