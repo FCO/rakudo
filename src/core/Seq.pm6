@@ -162,6 +162,123 @@ my class Seq is Cool does Iterable does Sequence {
     multi method from-loop(&body, &cond, &afterwards) {
         Seq.new(Rakudo::Iterator.CStyleLoop(&body, &cond, &afterwards))
     }
+
+    class PullSkipIterator does Iterator {
+        has Seq         $.original-seq;
+        has Iterator    $!original;
+        has Iterator    $.handling;
+        has Iterator    $!not-handled;
+        has             $!unhandled-item;
+        has             $.condition = {True};
+        has Bool        $.taking    = False;
+        method pull-one {
+            my $response;
+            with $!original-seq {
+                $!original      = $!original-seq.iterator;
+                $!original-seq  = Nil
+            }
+            with $!original {
+                if $!original !~~ ::?CLASS {
+                    $!handling = $!original;
+                    $!original = Nil
+                } else {
+                    $response := .pull-one;
+                    if $response =:= IterationEnd {
+                        with $!original.not-handled {
+                            $!handling = $_;
+                            $!original = Nil
+                        }
+                    }
+                }
+            }
+            with $!handling {
+                $response := .pull-one;
+                if $!taking {
+                    unless $response !=:= IterationEnd and $response ~~ $!condition {
+                        $!not-handled = $!handling;
+                        $!handling = Nil;
+                        $response := IterationEnd
+                    }
+                } else {
+                    until $response =:= IterationEnd {
+                        unless $response ~~ $!condition {
+                            $!unhandled-item = $response;
+                            last
+                        }
+                        $response := .pull-one;
+                    }
+                    $!not-handled = $!handling;
+                    $!handling = Nil;
+                    $response := IterationEnd
+                }
+            }
+            return $response
+        }
+        method not-handled {
+            my $nh;
+            with $!unhandled-item {
+                my $i = $!unhandled-item;
+                my $n = $!not-handled;
+                $!unhandled-item = Nil;
+                $!not-handled = Nil;
+                $nh = class :: does Iterator {
+                    my $item;
+                    method pull-one {
+                        with $i {
+                            $item = $i;
+                            $i = Nil
+                        } else {
+                            $item = $n.pull-one
+                        }
+                        $item
+                    }
+                }.new;
+            } orwith $!not-handled {
+                $nh = $!not-handled;
+                $!not-handled = Nil;
+            }
+            $nh
+        }
+    }
+    role PullSkipSeq[$parent = Nil] {
+        has Seq $.skipd = $parent;
+        method pull-while($condition, Seq :$skipd) {
+            return .pull-while: $condition with $!skipd;
+            Seq.new(PullSkipIterator.new: :original-seq(self), :$condition, :taking) but PullSkipSeq[$skipd];
+        }
+        method pull-until($condition, Seq :$skipd) {
+            return .pull-until: $condition with $!skipd;
+            Seq.new(PullSkipIterator.new: :original-seq(self), :condition{ $_ !~~ $condition }, :taking) but PullSkipSeq[$skipd];
+        }
+        method skip-while($condition) {
+            my $skipd = Seq.new(PullSkipIterator.new: :original-seq(self), :$condition, :!taking) but PullSkipSeq;
+            $skipd.pull-while(True, :$skipd)
+        }
+        method skip-until($condition) {
+            my $skipd = Seq.new(PullSkipIterator.new: :original-seq(self), :condition{ $_ !~~ $condition }, :!taking) but PullSkipSeq;
+            $skipd.pull-while(True, :$skipd)
+        }
+        method skip(PullSkipSeq: Int() $n = 1) {
+            self.skip-until: { $++ == $n }
+        }
+        multi method pull(Int() $n = 1) {
+            self.pull-until: { $++ == $n }
+        }
+    }
+    method pull-while($condition) {
+        Seq.new(PullSkipIterator.new: :original-seq(self), :$condition, :taking) but PullSkipSeq
+    }
+    method pull-until($condition) {
+        Seq.new(PullSkipIterator.new: :original-seq(self), :condition{ $_ !~~ $condition }, :taking) but PullSkipSeq
+    }
+    method skip-while($condition) {
+        my $skipd = Seq.new(PullSkipIterator.new: :original-seq(self), :$condition, :!taking) but PullSkipSeq;
+        $skipd.pull-while(True, :$skipd)
+    }
+    method skip-until($condition) {
+        my $skipd = Seq.new(PullSkipIterator.new: :original-seq(self), :condition{ $_ !~~ $condition }, :!taking) but PullSkipSeq;
+        $skipd.pull-while(True, :$skipd)
+    }
 }
 
 sub GATHER(&block) {

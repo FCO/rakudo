@@ -447,6 +447,19 @@ my class Any { # declared in BOOTSTRAP
         );
         $sum;
     }
+
+    method pull-while($condition) {
+        self.Seq.pull-while: $condition
+    }
+    method pull-until($condition) {
+        self.Seq.pull-until: $condition
+    }
+    method skip-while($condition) {
+        self.Seq.skip-while: $condition
+    }
+    method skip-until($condition) {
+        self.Seq.skip-until: $condition
+    }
 }
 Metamodel::ClassHOW.exclude_parent(Any);
 
